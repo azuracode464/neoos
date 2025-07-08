@@ -1,7 +1,8 @@
+#include "types.h"
 #include "paging.h"
 #include "kernel.h"
 
-bool paging_init(void) {
+neo_bool paging_init(void) {
     // Configuração básica de paginação
-    return true;
+    return neo_true;
 }

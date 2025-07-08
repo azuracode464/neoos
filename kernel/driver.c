@@ -1,9 +1,10 @@
+#include "types.h"
 #include "driver.h"
 #include "kernel.h"
-
-bool driver_init(void) {
+#include "types.h"
+neo_bool driver_init(void) {
     // Inicialização básica de drivers
-    return true;
+    return neo_true;
 }
 
 void driver_update(void) {

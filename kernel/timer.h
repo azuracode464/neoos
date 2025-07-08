@@ -1,6 +1,7 @@
+#include "types.h"
 #ifndef TIMER_H
 #define TIMER_H
 
-bool timer_init(uint32_t frequency);
+neo_bool timer_init(neo_u32 frequency);
 
 #endif

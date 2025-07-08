@@ -1,78 +1,53 @@
-# ===== Configurações Infalíveis =====
-ASM      := nasm
-CC       := clang
-LD       := ld.lld
-OBJCOPY  := llvm-objcopy
-XORRISO  := xorriso
+# 🧠 NEOOS MAKEFILE — INSANO E OTIMIZADO 🧠
 
-# Flags do compilador
-CFLAGS   := --target=x86_64-elf -ffreestanding -fno-stack-protector \
-            -fno-pic -mno-red-zone -mno-sse -mno-sse2 \
-            -Wall -Wextra -Werror -Ikernel/ -O2
+# Compiler and assembler
+CC     = clang
+AS     = nasm
+LD     = ld.lld
+CFLAGS = --target=x86_64-elf -ffreestanding -m64 -nostdlib -nostdinc -fno-builtin
+ASFLAGS = -f bin
 
-# Flags do linker
-LDFLAGS  := -nostdlib -static -Ttext=0x8000 -z max-page-size=0x1000
+# Paths
+BUILD   = build
+SRC     = kernel
+BOOT    = boot
+OUT_IMG = neoos.img
+KERNEL_BIN = kernel.bin
 
-# ===== Arquivos =====
-KERNEL_SRCS := $(wildcard kernel/*.c)
-KERNEL_OBJS := $(patsubst %.c,%.o,$(KERNEL_SRCS))
-KERNEL      := kernel.bin
-BOOT1       := boot1.bin
-BOOT2       := boot2.bin
-DISK_IMG    := neoos.img
-ISO_IMG     := neoos.iso
+# Sources
+KERNEL_CSRC = $(wildcard $(SRC)/*.c)
+KERNEL_OBJS = $(patsubst $(SRC)/%.c, $(BUILD)/%.o, $(KERNEL_CSRC))
+BOOT1 = $(BOOT)/boot1.asm
+BOOT2 = $(BOOT)/boot2.asm
 
-# ===== Regras Principais =====
-all: $(ISO_IMG)  # Build completo (agora gera ISO diretamente)
+# Targets
+all: $(OUT_IMG)
 
-$(ISO_IMG): $(DISK_IMG)
-	@echo "📀 Criando ISO com xorriso..."
-	@$(XORRISO) -as mkisofs \
-		-b $(DISK_IMG) \
-		-no-emul-boot \
-		-boot-load-size 4 \
-		-iso-level 2 \
-		-full-iso9660-filenames \
-		-o $(ISO_IMG) \
-		$(DISK_IMG) >/dev/null 2>&1
-	@echo "✅ ISO gerada: $(ISO_IMG)"
+# Step 1: Compile C files to .o
+$(BUILD)/%.o: $(SRC)/%.c
+	mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
 
-$(DISK_IMG): $(BOOT1) $(BOOT2) $(KERNEL)
-	@echo "🛠️  Montando imagem de disco..."
-	@dd if=/dev/zero of=$@ bs=512 count=2880 status=none
-	@dd if=$(BOOT1) of=$@ conv=notrunc status=none
-	@dd if=$(BOOT2) of=$@ seek=1 conv=notrunc status=none
-	@dd if=$(KERNEL) of=$@ seek=2 conv=notrunc status=none
+# Step 2: Link all .o files into kernel.bin
+$(KERNEL_BIN): $(KERNEL_OBJS)
+	$(LD) -nostdlib -Ttext 0x1000 -o $@ $^
 
-# ===== Bootloader e Kernel =====
-$(BOOT1): boot/boot1.asm
-	@echo "🔧 Compilando Bootloader (Stage 1)..."
-	@$(ASM) -f bin $< -o $@ -Wall
+# Step 3: Assemble bootloaders
+boot1.bin: $(BOOT1)
+	$(AS) $(ASFLAGS) $< -o $@
 
-$(BOOT2): boot/boot2.asm
-	@echo "🔧 Compilando Bootloader (Stage 2)..."
-	@$(ASM) -f bin $< -o $@ -Wall
+boot2.bin: $(BOOT2)
+	$(AS) $(ASFLAGS) $< -o $@
 
-kernel/%.o: kernel/%.c
-	@echo "🔄 Compilando $<..."
-	@$(CC) $(CFLAGS) -c $< -o $@
+# Step 4: Build floppy image (1.44MB)
+$(OUT_IMG): boot1.bin boot2.bin $(KERNEL_BIN)
+	dd if=/dev/zero of=$(OUT_IMG) bs=512 count=2880
+	dd if=boot1.bin of=$(OUT_IMG) conv=notrunc
+	dd if=boot2.bin of=$(OUT_IMG) seek=1 conv=notrunc
+	dd if=$(KERNEL_BIN) of=$(OUT_IMG) seek=10 conv=notrunc
 
-$(KERNEL): $(KERNEL_OBJS)
-	@echo "🧩 Linkando Kernel..."
-	@$(LD) $(LDFLAGS) $^ -o $@
-	@$(OBJCOPY) -O binary $@ $@
-
-# ===== Utilitários =====
-run: $(ISO_IMG)
-	@echo "🚀 Iniciando QEMU (from ISO)..."
-	@qemu-system-x86_64 -cdrom $(ISO_IMG) -d guest_errors
-
-debug: $(ISO_IMG)
-	@qemu-system-x86_64 -cdrom $(ISO_IMG) -S -s &
-	@echo "🐛 Debug mode: conecte com 'gdb -ex 'target remote localhost:1234'"
-
+# Clean everything
 clean:
-	@echo "🧹 Limpando build..."
-	@rm -f $(BOOT1) $(BOOT2) $(KERNEL) $(KERNEL_OBJS) $(DISK_IMG) $(ISO_IMG)
+	rm -rf $(BUILD) boot1.bin boot2.bin $(KERNEL_BIN) $(OUT_IMG)
 
-.PHONY: all clean run debug
+.PHONY: all clean

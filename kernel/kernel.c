@@ -1,3 +1,4 @@
+#include "types.h"
 #include "kernel.h"
 #include "kboard.h"
 #include "memory.h"
@@ -59,22 +60,22 @@
 // ============================================================================
 
 typedef struct {
-    uint32_t magic;
-    uint32_t version;
-    uint32_t system_state;
-    uint32_t uptime;
-    uint32_t total_memory;
-    uint32_t used_memory;
-    uint32_t processes_count;
-    uint32_t interrupts_count;
+    neo_u32 magic;
+    neo_u32 version;
+    neo_u32 system_state;
+    neo_u32 uptime;
+    neo_u32 total_memory;
+    neo_u32 used_memory;
+    neo_u32 processes_count;
+    neo_u32 interrupts_count;
     char boot_device[32];
     char kernel_version[64];
 } system_info_t;
 
 typedef struct {
-    uint32_t log_level;
-    uint32_t max_entries;
-    uint32_t current_entry;
+    neo_u32 log_level;
+    neo_u32 max_entries;
+    neo_u32 current_entry;
     char entries[1000][128];
 } kernel_log_t;
 
@@ -82,37 +83,35 @@ typedef struct {
 // VARIÁVEIS GLOBAIS
 // ============================================================================
 
-static uint16_t* video_memory = (uint16_t*)VGA_MEMORY;
+static neo_u16* video_memory = (neo_u16*)VGA_MEMORY;
 static int cursor_x = 0;
 static int cursor_y = 0;
-static uint8_t terminal_color = VGA_COLOR_WHITE | (VGA_COLOR_BLACK << 4);
-static system_info_t system_info;
-static kernel_log_t kernel_log;
+static neo_u8 terminal_color = VGA_COLOR_WHITE | (VGA_COLOR_BLACK << 4);
 static char input_buffer[COMMAND_BUFFER_SIZE];
 static int input_pos = 0;
-static uint32_t kernel_ticks = 0;
-static bool system_initialized = false;
+static neo_u32 kernel_ticks = 0;
+static neo_bool system_initialized = neo_false;
 
 // ============================================================================
 // FUNÇÕES DE BAIXO NÍVEL
 // ============================================================================
 
-void outb(uint16_t port, uint8_t value) {
+void outb(neo_u16 port, neo_u8 value) {
     asm volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
 }
 
-uint8_t inb(uint16_t port) {
-    uint8_t ret;
+neo_u8 inb(neo_u16 port) {
+    neo_u8 ret;
     asm volatile ("inb %1, %0" : "=a"(ret) : "Nd"(port));
     return ret;
 }
 
-void outw(uint16_t port, uint16_t value) {
+void outw(neo_u16 port, neo_u16 value) {
     asm volatile ("outw %0, %1" : : "a"(value), "Nd"(port));
 }
 
-uint16_t inw(uint16_t port) {
-    uint16_t ret;
+neo_u16 inw(neo_u16 port) {
+    neo_u16 ret;
     asm volatile ("inw %1, %0" : "=a"(ret) : "Nd"(port));
     return ret;
 }
@@ -137,16 +136,16 @@ void hlt(void) {
 // FUNÇÕES DE VÍDEO E TERMINAL
 // ============================================================================
 
-void set_terminal_color(uint8_t color) {
+void set_terminal_color(neo_u8 color) {
     terminal_color = color;
 }
 
 void update_cursor(void) {
-    uint16_t pos = cursor_y * VGA_WIDTH + cursor_x;
+    neo_u16 pos = cursor_y * VGA_WIDTH + cursor_x;
     outb(0x3D4, 0x0F);
-    outb(0x3D5, (uint8_t)(pos & 0xFF));
+    outb(0x3D5, (neo_u8)(pos & 0xFF));
     outb(0x3D4, 0x0E);
-    outb(0x3D5, (uint8_t)((pos >> 8) & 0xFF));
+    outb(0x3D5, (neo_u8)((pos >> 8) & 0xFF));
 }
 
 void scroll_screen(void) {
@@ -202,7 +201,7 @@ void print_string(const char* str) {
     }
 }
 
-void print_hex(uint32_t value) {
+void print_hex(neo_u32 value) {
     char hex_digits[] = "0123456789ABCDEF";
     char buffer[11] = "0x";
     
@@ -213,7 +212,7 @@ void print_hex(uint32_t value) {
     print_string(buffer);
 }
 
-void print_dec(uint32_t value) {
+void print_dec(neo_u32 value) {
     char buffer[11];
     int i = 0;
     
@@ -587,7 +586,6 @@ void kernel_early_init(void) {
 
 void kernel_init(void) {
     log_info("Initializing core subsystems");
-    
     // Inicializa gerenciamento de memória
     print_string("Initializing memory management... ");
     if (memory_init()) {
@@ -674,7 +672,7 @@ void kernel_init(void) {
     sti();
     
     system_info.system_state = SYSTEM_RUNNING;
-    system_initialized = true;
+    system_initialized = neo_true;
     
     log_info("Kernel initialization completed successfully");
 }

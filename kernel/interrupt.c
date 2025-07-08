@@ -1,7 +1,8 @@
+#include "types.h"
 #include "interrupt.h"
 #include "kernel.h"
 
-bool interrupt_init(void) {
+neo_bool interrupt_init(void) {
     // Configuração básica da IDT
-    return true;
+    return neo_true;
 }

@@ -1,7 +1,8 @@
+#include "types.h"
 #ifndef PAGING_H
 #define PAGING_H
 
-bool paging_init(void);
+neo_bool paging_init(void);
 
 #endif
 

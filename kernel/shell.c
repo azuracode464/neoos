@@ -1,6 +1,7 @@
+#include "types.h"
 #include "shell.h"
 #include "kernel.h"
 
-bool shell_init(void) {
-    return true; // Shell básico implementado no kernel
+neo_bool shell_init(void) {
+    return neo_true; // Shell básico implementado no kernel
 }

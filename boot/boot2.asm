@@ -298,4 +298,4 @@ pd_table:
     times 512 dq 0
 
 ; Preencher até o final do setor
-times 4096 - ($ - $$) db 0
+times 16384 - ($ - $$) db 0   ; 16KB

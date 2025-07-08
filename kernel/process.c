@@ -1,10 +1,11 @@
+#include "types.h"
 #include "process.h"
 #include "kernel.h"
 #include "system.h"
 
-static uint32_t process_count = 0;
+static neo_u32 process_count = 0;
 
-void process_init(void) {
+neo_bool process_init(void) {
     process_count = 1; // Processo kernel
 }
 
@@ -20,14 +21,14 @@ void process_list(void) {
     print_string("  PID 1: kernel\n");
 }
 
-bool process_test(void) {
-    uint32_t old_count = process_count;
+neo_bool process_test(void) {
+    neo_u32 old_count = process_count;
     process_count++;
-    if (process_count != old_count + 1) return false;
+    if (process_count != old_count + 1) return neo_false;
     process_count = old_count;
-    return true;
+    return neo_true;
 }
 
-uint32_t process_get_count(void) {
+neo_u32 process_get_count(void) {
     return process_count;
 }

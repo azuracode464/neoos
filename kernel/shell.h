@@ -1,6 +1,7 @@
+#include "types.h"
 #ifndef SHELL_H
 #define SHELL_H
 
-bool shell_init(void);
+neo_bool shell_init(void);
 
 #endif

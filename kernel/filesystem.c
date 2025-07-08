@@ -1,14 +1,15 @@
+#include "types.h"
 #include "filesystem.h"
 #include "kernel.h"
 
-bool filesystem_init(void) {
-    return false; // Sem sistema de arquivos por enquanto
+neo_bool filesystem_init(void) {
+    return neo_false; // Sem sistema de arquivos por enquanto
 }
 
 void filesystem_shutdown(void) {
     // Nada para desmontar
 }
 
-bool filesystem_test(void) {
-    return false; // Sem testes
+neo_bool filesystem_test(void) {
+    return neo_false; // Sem testes
 }
