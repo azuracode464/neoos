@@ -1,203 +1,301 @@
-; boot2.asm - Second stage bootloader (64-bit ready)
-[BITS 16]
-[ORG 0x7E00]
+[bits 16]
+[org 0x7E00]
 
-start:
+stage2_start:
+    ; Habilitar A20
+    call enable_a20
+    
+    ; Carregar GDT
     cli
-    xor ax, ax
-    mov ds, ax
-    mov es, ax
-    mov ss, ax
-    mov sp, 0x7C00           ; Stack grows downward from 0x7C00
+    lgdt [gdt_descriptor]
+    
+    ; Habilitar modo protegido
+    mov eax, cr0
+    or eax, 0x1
+    mov cr0, eax
+    
+    ; Pular para código de 32-bit
+    jmp CODE_SEG:protected_mode_start
 
-    ; Print loading message
-    mov si, msg_loading_kernel
-    call print_string
-
-    ; Load kernel (16 sectors = 8KB)
-    mov bx, 0x8000           ; ES:BX = 0x0000:0x8000
-    mov es, ax
-    mov ah, 0x02             ; Read function
-    mov al, 16               ; Sectors to read
-    mov ch, 0                ; Cylinder 0
-    mov cl, 3                ; Sector 3
-    mov dh, 0                ; Head 0
-    mov dl, 0x80             ; Drive 0x80
-    int 0x13
-    jc disk_error
-
-    ; Check for long mode support
-    call check_long_mode
-    jc no_long_mode
-
-    ; Set up paging
-    call setup_paging
-
-    ; Enter long mode and jump to kernel
-    call enter_long_mode
-
-disk_error:
-    mov si, msg_disk_error
-    call print_string
-    hlt
-    jmp $
-
-no_long_mode:
-    mov si, msg_no_long_mode
-    call print_string
-    hlt
-    jmp $
-
-; --------------------------------------------------
-; Utility Functions
-; --------------------------------------------------
-print_string:
-    push ax
-    push bx
-    mov ah, 0x0E            ; BIOS teletype
-    mov bh, 0               ; Page 0
-.loop:
-    lodsb                   ; Load next char
-    test al, al
-    jz .done
-    int 0x10
-    jmp .loop
-.done:
-    pop bx
-    pop ax
+enable_a20:
+    ; Método rápido de ativação do A20
+    in al, 0x92
+    or al, 2
+    out 0x92, al
     ret
 
-; --------------------------------------------------
-; Check for Long Mode Support
-; --------------------------------------------------
-check_long_mode:
-    ; Check for CPUID
-    pushfd
-    pop eax
-    mov ecx, eax
-    xor eax, 0x200000
-    push eax
-    popfd
-    pushfd
-    pop eax
-    xor eax, ecx
-    shr eax, 21
-    and eax, 1
-    push ecx
-    popfd
-    test eax, eax
-    jz .no_support
+[bits 32]
+protected_mode_start:
+    ; Configurar segmentos de dados
+    mov ax, DATA_SEG
+    mov ds, ax
+    mov ss, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    
+    ; Configurar pilha
+    mov esp, 0x90000
+    
+    ; Verificar modo longo
+    call check_long_mode
+    
+    ; Configurar paginação
+    call setup_paging
+    
+    ; Habilitar modo longo
+    jmp enable_long_mode
 
-    ; Check for extended functions
+check_long_mode:
+    ; Verificar suporte a modo longo
     mov eax, 0x80000000
     cpuid
     cmp eax, 0x80000001
-    jb .no_support
+    jb .no_long_mode
 
-    ; Check for long mode bit
     mov eax, 0x80000001
     cpuid
     test edx, (1 << 29)
-    jz .no_support
-
-    clc                     ; Clear carry = success
-    ret
-.no_support:
-    stc                     ; Set carry = failure
+    jz .no_long_mode
     ret
 
-; --------------------------------------------------
-; Set Up Identity Paging (1GB)
-; --------------------------------------------------
+.no_long_mode:
+    mov esi, no_long_mode_msg
+    call print_string_32
+    jmp $
+
 setup_paging:
-    ; Clear memory for page tables (0x1000-0x4000)
-    mov edi, 0x1000
-    mov ecx, 0x0C00         ; Clear 3 pages (0x3000 bytes)
-    xor eax, eax
-    rep stosd
-
-    ; PML4 at 0x1000
-    mov edi, 0x1000
-    mov dword [edi], 0x2000 | 0x03  ; Point to PDP, present + writable
-    mov dword [edi+4], 0
-
-    ; PDP at 0x2000
-    mov edi, 0x2000
-    mov dword [edi], 0x3000 | 0x03  ; Point to PD, present + writable
-    mov dword [edi+4], 0
-
-    ; PD at 0x3000 (1GB identity mapped)
-    mov edi, 0x3000
-    mov dword [edi], 0x00000083      ; 1GB page, present + writable + huge
-    mov dword [edi+4], 0
-
+    ; Configurar tabelas de paginação básicas
+    ; PML4
+    mov eax, pml4_table
+    or eax, 0b11 ; Presente + Gravável
+    mov [pml4_table + 0], eax
+    
+    ; PDP
+    mov eax, pdpt_table
+    or eax, 0b11
+    mov [pdpt_table + 0], eax
+    
+    ; PD
+    mov eax, pd_table
+    or eax, 0b11
+    mov [pd_table + 0], eax
+    
+    ; Mapear primeiro GB (512 páginas de 2MB)
+    mov ecx, 0
+    mov eax, 0x83 ; Presente + Gravável + Tamanho de página
+.map_pd_table:
+    mov [pd_table + ecx * 8], eax
+    add eax, 0x200000
+    inc ecx
+    cmp ecx, 512
+    jne .map_pd_table
+    
+    ; Habilitar PAE
+    mov eax, cr4
+    or eax, 1 << 5
+    mov cr4, eax
+    
+    ; Carregar CR3 com endereço da PML4
+    mov eax, pml4_table
+    mov cr3, eax
+    
     ret
 
-; --------------------------------------------------
-; Switch to Long Mode
-; --------------------------------------------------
-enter_long_mode:
-    ; Disable interrupts
-    cli
-
-    ; Enable PAE
-    mov eax, cr4
-    or eax, (1 << 5)        ; PAE bit
-    mov cr4, eax
-
-    ; Set LME bit in EFER MSR
+enable_long_mode:
+    ; Habilitar modo longo (EFER.LME=1)
     mov ecx, 0xC0000080
     rdmsr
-    or eax, (1 << 8)        ; LME bit
+    or eax, 1 << 8
     wrmsr
-
-    ; Enable paging
+    
+    ; Habilitar paginação
     mov eax, cr0
-    or eax, (1 << 31)       ; PG bit
+    or eax, 1 << 31
     mov cr0, eax
-
-    ; Load 64-bit GDT
-    lgdt [gdt64_ptr]
-
-    ; Far jump to 64-bit code
-    jmp 0x08:long_mode_entry
-
-; --------------------------------------------------
-; 64-bit Code Segment
-; --------------------------------------------------
-[BITS 64]
-long_mode_entry:
-    ; Clear segment registers
-    mov ax, 0x10            ; Data segment selector
+    
+    ; Carregar GDT de 64-bit
+    lgdt [gdt64_descriptor]
+    
+    ; Atualizar segmentos
+    mov ax, GDT64_DATA
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
     mov ss, ax
+    
+    ; Pular para código de 64-bit
+    jmp GDT64_CODE:long_mode_start
 
-    ; Jump to kernel (loaded at 0x8000)
-    jmp 0x8000
+[bits 64]
+long_mode_start:
+    ; Configurar pilha
+    mov rsp, 0x7FFFF
+    
+    ; Limpar tela
+    mov edi, 0xB8000
+    mov rax, 0x1F201F201F201F20 ; Fundo azul, texto branco, espaço
+    mov ecx, 500
+    rep stosq
+    
+    ; Mensagem de boot
+    mov rsi, boot_msg
+    call print_string_64
+    
+    ; Carregar kernel
+    call load_kernel
+    
+    ; Pular para o kernel
+    jmp 0x100000
 
-; --------------------------------------------------
-; 64-bit GDT
-; --------------------------------------------------
-gdt64:
-    dq 0                    ; Null descriptor
-    dq 0x00AF9A000000FFFF   ; Code: exec/read, present, 64-bit
-    dq 0x00AF92000000FFFF   ; Data: read/write, present
-gdt64_ptr:
-    dw gdt64_end - gdt64 - 1
-    dq gdt64
+load_kernel:
+    ; Carregar kernel do disco (setores 5-64)
+    mov rdi, 0x100000 ; Endereço de destino
+    mov rcx, 5        ; Setor inicial
+    mov rdx, 60       ; Número de setores
+    
+.read_sector:
+    push rcx
+    push rdx
+    push rdi
+    
+    ; Converter LBA para CHS
+    mov rax, rcx
+    xor rdx, rdx
+    mov rbx, 63       ; Setores por trilha
+    div rbx
+    
+    ; AX = trilha, DX = setor (0-based)
+    mov cx, dx
+    inc cx            ; Setor (1-based)
+    
+    ; Calcular cilindro/cabeçote
+    xor rdx, rdx
+    mov rbx, 16       ; Cabeçotes por cilindro
+    div rbx
+    
+    ; AX = cilindro, DX = cabeçote
+    mov dh, dl        ; DH = cabeçote
+    mov ch, al        ; CH = cilindro (low 8 bits)
+    shr ax, 8
+    and al, 0x0F      ; CL[6:7] = cilindro[8:9]
+    or cl, al
+    
+    ; Ler setor
+    mov ah, 0x02      ; Função de leitura
+    mov al, 1         ; 1 setor
+    mov dl, [boot_drive]
+    mov rbx, rdi
+    int 0x13
+    jc .disk_error
+    
+    pop rdi
+    pop rdx
+    pop rcx
+    
+    add rdi, 512      ; Próximo buffer
+    inc rcx           ; Próximo setor
+    dec rdx
+    jnz .read_sector
+    ret
+
+.disk_error:
+    mov rsi, disk_error_msg
+    call print_string_64
+    jmp $
+
+; Funções de impressão
+print_string_32:
+    mov edi, 0xB8000
+    mov ah, 0x0F
+.loop:
+    lodsb
+    test al, al
+    jz .done
+    stosw
+    jmp .loop
+.done:
+    ret
+
+print_string_64:
+    mov rdi, 0xB8000
+    mov ah, 0x1F ; Cor: fundo azul, texto branco
+.loop:
+    lodsb
+    test al, al
+    jz .done
+    stosw
+    jmp .loop
+.done:
+    ret
+
+; Dados
+boot_drive db 0
+boot_msg db "NeoOS Bootloader - Stage 2", 0
+disk_error_msg db "Kernel Load Error!", 0
+no_long_mode_msg db "64-bit Not Supported!", 0
+
+; GDT de 32-bit
+gdt_start:
+    dq 0x0 ; Descritor nulo
+gdt_code:
+    dw 0xFFFF    ; Limit (0-15)
+    dw 0x0       ; Base (0-15)
+    db 0x0       ; Base (16-23)
+    db 10011010b ; Flags (P=1, DPL=00, S=1, Type=1010)
+    db 11001111b ; Flags (G=1, D/B=1, AVL=0, Limit 16-19=1111)
+    db 0x0       ; Base (24-31)
+gdt_data:
+    dw 0xFFFF    ; Limit (0-15)
+    dw 0x0       ; Base (0-15)
+    db 0x0       ; Base (16-23)
+    db 10010010b ; Flags (P=1, DPL=00, S=1, Type=0010)
+    db 11001111b ; Flags (G=1, D/B=1, AVL=0, Limit 16-19=1111)
+    db 0x0       ; Base (24-31)
+gdt_end:
+
+gdt_descriptor:
+    dw gdt_end - gdt_start - 1
+    dd gdt_start
+
+CODE_SEG equ gdt_code - gdt_start
+DATA_SEG equ gdt_data - gdt_start
+
+; GDT de 64-bit
+gdt64_start:
+    dq 0x0 ; Descritor nulo
+gdt64_code:
+    dw 0xFFFF    ; Limit (0-15)
+    dw 0x0       ; Base (0-15)
+    db 0x0       ; Base (16-23)
+    db 10011010b ; Flags (P=1, DPL=00, S=1, Type=1010)
+    db 00100000b ; Flags (G=0, D/B=0, L=1, Limit 16-19=0010)
+    db 0x0       ; Base (24-31)
+gdt64_data:
+    dw 0xFFFF    ; Limit (0-15)
+    dw 0x0       ; Base (0-15)
+    db 0x0       ; Base (16-23)
+    db 10010010b ; Flags (P=1, DPL=00, S=1, Type=0010)
+    db 00000000b ; Flags (G=0, D/B=0, L=0, Limit 16-19=0000)
+    db 0x0       ; Base (24-31)
 gdt64_end:
 
-; --------------------------------------------------
-; Messages
-; --------------------------------------------------
-msg_loading_kernel db "Loading NeoOS kernel...", 0x0D, 0x0A, 0
-msg_disk_error db "Error: Disk read failed!", 0x0D, 0x0A, 0
-msg_no_long_mode db "Error: 64-bit mode not supported!", 0x0D, 0x0A, 0
+gdt64_descriptor:
+    dw gdt64_end - gdt64_start - 1
+    dd gdt64_start
 
-; --------------------------------------------------
-; Sector Padding
-; --------------------------------------------------
-times 512-($-$$) db 0
+GDT64_CODE equ gdt64_code - gdt64_start
+GDT64_DATA equ gdt64_data - gdt64_start
+
+; Tabelas de paginação (alinhadas em 4KB)
+align 4096
+pml4_table:
+    times 512 dq 0
+pdpt_table:
+    times 512 dq 0
+pd_table:
+    times 512 dq 0
+
+; Preencher até o final do setor
+times 4096 - ($ - $$) db 0
